@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 
-import joblib
 import pandas as pd
 
 from analysis import run_all_analyses
-from config import FEATURE_COLUMNS, OUTPUT_DIR
+from config import FEATURE_COLUMNS, OUTPUT_DIR, RF_FEATURE_METADATA_PATH
 from data_loader import load_aligned_datasets
 from models import (
     fit_final_random_forest,
@@ -19,9 +17,23 @@ from models import (
     tune_random_forest,
     repeated_holdout_rf,
     recursive_feature_elimination_rf,
+    select_top_n_via_rfe_cv,
 )
 from predictor import SuperconductorPredictor
 from training import run_full_pipeline
+
+
+def _load_best_params() -> dict:
+    tuning_path = OUTPUT_DIR / 'rf_tuning' / 'rf_tuning_results.csv'
+    if tuning_path.exists():
+        tuning = pd.read_csv(tuning_path)
+        best = tuning.iloc[0]
+        return {
+            'max_features': int(best['max_features']),
+            'n_estimators': int(best['n_estimators']),
+            'min_samples_leaf': int(best['min_samples_leaf']),
+        }
+    return {'max_features': 10, 'n_estimators': 1000, 'min_samples_leaf': 1}
 
 
 def cmd_check_data() -> None:
@@ -52,41 +64,57 @@ def cmd_tune_rf() -> None:
 
 def cmd_train_rf() -> None:
     train_df, unique_df, _ = load_aligned_datasets()
-    tuning_path = OUTPUT_DIR / 'rf_tuning' / 'rf_tuning_results.csv'
-    if tuning_path.exists():
-        tuning = pd.read_csv(tuning_path)
-        best = tuning.iloc[0]
-        params = {
-            'max_features': int(best['max_features']),
-            'n_estimators': int(best['n_estimators']),
-            'min_samples_leaf': int(best['min_samples_leaf']),
-        }
-    else:
-        params = {'max_features': 10, 'n_estimators': 1000, 'min_samples_leaf': 1}
+    params = _load_best_params()
 
-    rf_cv = repeated_holdout_rf(train_df, params)
+    ranking_df, ranking_desc = recursive_feature_elimination_rf(
+        train_df,
+        OUTPUT_DIR / 'rfe',
+        params,
+        permutation_repeats=3,
+        ranking_n_estimators=min(300, params['n_estimators']),
+    )
+    _, summary_df, best_n = select_top_n_via_rfe_cv(
+        train_df,
+        OUTPUT_DIR / 'rfe_topn_selection',
+        params,
+        n_repeats=5,
+        permutation_repeats=2,
+        ranking_n_estimators=min(200, params['n_estimators']),
+    )
+    selected_features = ranking_desc[:best_n]
+
+    rf_cv = repeated_holdout_rf(train_df, params, selected_features=selected_features)
     rf_cv.to_csv(OUTPUT_DIR / 'rf_cv_results.csv', index=False)
     print(rf_cv[['rmse', 'r2']].describe())
 
-    fit_final_random_forest(train_df, OUTPUT_DIR / 'rf_final', params)
+    fit_final_random_forest(train_df, OUTPUT_DIR / 'rf_final', params, selected_features)
     train_formula_random_forest(unique_df, OUTPUT_DIR / 'formula_model', params)
     print('Random forest models trained and saved.')
+    print(f'Selected top-n features: {best_n}')
+    print(summary_df.head())
 
 
-def cmd_rfe(max_steps: int) -> None:
+def cmd_rfe() -> None:
     train_df, _, _ = load_aligned_datasets()
-    tuning_path = OUTPUT_DIR / 'rf_tuning' / 'rf_tuning_results.csv'
-    params = {'max_features': 10, 'n_estimators': 500, 'min_samples_leaf': 1}
-    if tuning_path.exists():
-        tuning = pd.read_csv(tuning_path)
-        best = tuning.iloc[0]
-        params = {
-            'max_features': int(best['max_features']),
-            'n_estimators': 500,
-            'min_samples_leaf': int(best['min_samples_leaf']),
-        }
-    rfe_df = recursive_feature_elimination_rf(train_df, OUTPUT_DIR / 'rfe', params, max_steps=max_steps)
-    print(rfe_df.tail())
+    params = _load_best_params()
+    ranking_df, ranking_desc = recursive_feature_elimination_rf(
+        train_df,
+        OUTPUT_DIR / 'rfe',
+        params,
+        permutation_repeats=3,
+        ranking_n_estimators=min(300, params['n_estimators']),
+    )
+    _, summary_df, best_n = select_top_n_via_rfe_cv(
+        train_df,
+        OUTPUT_DIR / 'rfe_topn_selection',
+        params,
+        n_repeats=5,
+        permutation_repeats=2,
+        ranking_n_estimators=min(200, params['n_estimators']),
+    )
+    print(ranking_df.tail())
+    print('\nBest n according to repeated holdout CV:', best_n)
+    print(summary_df.head())
 
 
 def cmd_gbm() -> None:
@@ -95,8 +123,8 @@ def cmd_gbm() -> None:
     print(results.head())
 
 
-def cmd_train_all(with_gbm: bool, with_rfe: bool, rfe_steps: int) -> None:
-    summary = run_full_pipeline(run_optional_gbm=with_gbm, run_rfe=with_rfe, rfe_max_steps=rfe_steps)
+def cmd_train_all(with_gbm: bool) -> None:
+    summary = run_full_pipeline(run_optional_gbm=with_gbm, run_rfe=True, rfe_max_steps=25)
     print(json.dumps(summary, indent=2))
 
 
@@ -116,8 +144,11 @@ def cmd_predict_feature_row(csv_path: str) -> None:
     if len(df) != 1:
         raise ValueError('Input CSV must contain exactly one row.')
     predictor = SuperconductorPredictor()
-    pred = predictor.predict_from_feature_row(df.iloc[0][FEATURE_COLUMNS].to_dict())
+    pred = predictor.predict_from_feature_row(df.iloc[0].to_dict())
     print(f'Predicted Tc: {pred:.4f} K')
+    if RF_FEATURE_METADATA_PATH.exists():
+        metadata = json.loads(RF_FEATURE_METADATA_PATH.read_text(encoding='utf-8'))
+        print('Selected feature count:', metadata.get('n_selected_features'))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -129,15 +160,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser('train-baselines')
     sub.add_parser('tune-rf')
     sub.add_parser('train-rf')
+    sub.add_parser('rfe')
     sub.add_parser('gbm')
-
-    p_rfe = sub.add_parser('rfe')
-    p_rfe.add_argument('--max-steps', type=int, default=25)
 
     p_all = sub.add_parser('train-all')
     p_all.add_argument('--with-gbm', action='store_true')
-    p_all.add_argument('--with-rfe', action='store_true')
-    p_all.add_argument('--rfe-steps', type=int, default=25)
 
     p_formula = sub.add_parser('predict-formula')
     p_formula.add_argument('--formula', required=True)
@@ -163,11 +190,11 @@ def main() -> None:
     elif args.command == 'train-rf':
         cmd_train_rf()
     elif args.command == 'rfe':
-        cmd_rfe(args.max_steps)
+        cmd_rfe()
     elif args.command == 'gbm':
         cmd_gbm()
     elif args.command == 'train-all':
-        cmd_train_all(args.with_gbm, args.with_rfe, args.rfe_steps)
+        cmd_train_all(args.with_gbm)
     elif args.command == 'predict-formula':
         cmd_predict_formula(args.formula, args.match_level)
     elif args.command == 'predict-feature-row':

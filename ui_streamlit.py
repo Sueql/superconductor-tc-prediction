@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -11,11 +10,13 @@ from predictor import SuperconductorPredictor
 
 st.set_page_config(page_title='Superconductor Tc Prediction', layout='wide')
 st.title('Superconductor Critical Temperature Prediction')
-st.caption('Python adaptation of the original R workflow. Two modes are supported: formula-based prediction and 81-feature-row prediction.')
+st.caption('Python adaptation of the original R workflow. Two modes are supported: formula-based prediction and feature-row prediction. The deployed RF model now uses RF-RFE selected top-n features internally.')
+
 
 @st.cache_resource
 def load_predictor() -> SuperconductorPredictor:
     return SuperconductorPredictor()
+
 
 try:
     predictor = load_predictor()
@@ -27,13 +28,14 @@ with st.sidebar:
     st.header('Project status')
     st.write(f'Model directory: `{MODEL_DIR}`')
     st.write(f'Output directory: `{OUTPUT_DIR}`')
+    st.write(f'Selected RF features: **{len(predictor.selected_features)}**')
     if (OUTPUT_DIR / 'metrics_summary.json').exists():
         metrics = json.loads((OUTPUT_DIR / 'metrics_summary.json').read_text(encoding='utf-8'))
         st.json(metrics)
     else:
         st.info('No metrics_summary.json found yet. Run main.py train-all first.')
 
-tab1, tab2 = st.tabs(['Predict from formula', 'Predict from 81-feature row'])
+tab1, tab2 = st.tabs(['Predict from formula', 'Predict from feature row'])
 
 with tab1:
     st.subheader('Formula-based prediction')
@@ -54,8 +56,8 @@ with tab1:
             st.error(str(exc))
 
 with tab2:
-    st.subheader('Predict from one 81-feature row')
-    st.write('Upload a CSV with one row and the exact 81 feature columns, or edit values manually below.')
+    st.subheader('Predict from one feature row')
+    st.write('Upload a CSV with one row and the exact 81 feature columns, or edit values manually below. The model will automatically keep only the selected top-n RF-RFE features.')
     upload = st.file_uploader('Upload one-row CSV', type=['csv'])
     feature_values = {}
 
@@ -75,6 +77,9 @@ with tab2:
         for i, col in enumerate(FEATURE_COLUMNS):
             with cols[i % 3]:
                 feature_values[col] = st.number_input(col, value=float(defaults[col]), format='%.6f')
+
+    st.write('### Features actually used by the deployed RF model')
+    st.write(', '.join(predictor.selected_features))
 
     if st.button('Predict Tc from feature row'):
         try:

@@ -22,8 +22,10 @@ Instead, this adaptation fully implements the downstream functionality on top of
 - correlation + PCA
 - linear baseline + repeated holdout CV
 - random forest tuning + repeated holdout CV
-- final random forest model + variable importance
-- recursive feature elimination (optional)
+- RF-RFE ranking based on permutation importance
+- repeated-holdout selection of the best top-n features
+- final random forest model trained on the selected top-n features
+- variable importance on the selected model
 - optional GBM-style exploration
 - final prediction interface
 
@@ -55,7 +57,7 @@ superconductor_tc_prediction/
 - `formula_parser.py`: parse chemical formulas like `Ba0.2La1.8Cu1O4`
 - `data_loader.py`: load and validate `train.csv` / `unique_m.csv`, add iron/cuprate indicators
 - `analysis.py`: plots and statistical summaries corresponding to the EDA sections of the R script
-- `models.py`: linear/ridge baseline, random forest tuning/final model, optional GBM, recursive elimination, formula-model training
+- `models.py`: linear/ridge baseline, random forest tuning, RF-RFE ranking, top-n feature selection, final RF model, optional GBM, formula-model training
 - `training.py`: end-to-end orchestration
 - `predictor.py`: inference utilities for formula and feature-row prediction
 - `ui_streamlit.py`: interactive interface
@@ -109,13 +111,17 @@ python main.py tune-rf
 ```
 
 ### 5. Train final RF models (feature model + formula model)
+This step now automatically does:
+1. RF-RFE ranking
+2. repeated-holdout search for the best top-n features
+3. final RF training on the selected top-n subset
 ```bash
 python main.py train-rf
 ```
 
-### 6. Optional: recursive feature elimination
+### 6. Inspect RF-RFE feature ranking and top-n selection separately
 ```bash
-python main.py rfe --max-steps 25
+python main.py rfe
 ```
 
 ### 7. Optional: GBM exploratory run
@@ -125,7 +131,7 @@ python main.py gbm
 
 ### 8. One-shot full pipeline
 ```bash
-python main.py train-all --with-rfe --rfe-steps 25
+python main.py train-all
 ```
 
 ## Prediction from command line
@@ -153,7 +159,7 @@ The interface supports:
    It also returns exact/near-exact matches and top similar materials.
 
 2. **81-feature-row prediction**  
-   This uses the final random forest trained on `train.csv`.
+   This uses the final random forest trained on the RF-RFE selected top-n subset of `train.csv`. You can still upload all 81 features; the app automatically keeps only the selected subset internally.
 
 ## Outputs generated
 
@@ -165,7 +171,8 @@ The project writes results to:
 - `outputs/rf_tuning/`
 - `outputs/rf_final/`
 - `outputs/formula_model/`
-- `outputs/rfe/` (optional)
+- `outputs/rfe/`
+- `outputs/rfe_topn_selection/`
 - `outputs/gbm_optional/` (optional)
 
 and models to:
@@ -173,6 +180,7 @@ and models to:
 - `models/linear_model.joblib`
 - `models/ridge_model.joblib`
 - `models/rf_feature_model.joblib`
+- `models/rf_feature_model_metadata.json`
 - `models/rf_formula_model.joblib`
 
 ## Design choice for the UI

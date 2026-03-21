@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 import joblib
 import numpy as np
@@ -12,11 +13,12 @@ from config import (
     ELEMENTS,
     FEATURE_COLUMNS,
     FORMULA_COLUMN,
+    RF_FEATURE_METADATA_PATH,
     RF_FEATURE_MODEL_PATH,
     RF_FORMULA_MODEL_PATH,
     TARGET_COLUMN,
 )
-from data_loader import get_formula_target, load_aligned_datasets
+from data_loader import load_aligned_datasets
 from formula_parser import formula_to_vector, normalize_vector
 
 
@@ -33,11 +35,18 @@ class SuperconductorPredictor:
         self.feature_model = joblib.load(feature_model_path) if Path(feature_model_path).exists() else None
         self.formula_model = joblib.load(formula_model_path) if Path(formula_model_path).exists() else None
         self.train_df, self.unique_df, self.train_with_indicators = load_aligned_datasets()
+        self.selected_features = list(FEATURE_COLUMNS)
+        if RF_FEATURE_METADATA_PATH.exists():
+            metadata = json.loads(RF_FEATURE_METADATA_PATH.read_text(encoding='utf-8'))
+            self.selected_features = metadata.get('selected_features', list(FEATURE_COLUMNS))
 
     def predict_from_feature_row(self, feature_row: Dict[str, float]) -> float:
         if self.feature_model is None:
             raise FileNotFoundError('Feature random forest model is not trained yet.')
-        row = pd.DataFrame([{k: feature_row[k] for k in FEATURE_COLUMNS}])
+        missing = [k for k in FEATURE_COLUMNS if k not in feature_row]
+        if missing:
+            raise ValueError(f'Missing feature values: {missing[:10]}')
+        row = pd.DataFrame([{k: feature_row[k] for k in self.selected_features}])
         pred = self.feature_model.predict(row)[0]
         return float(pred)
 
@@ -48,7 +57,6 @@ class SuperconductorPredictor:
         vec = formula_to_vector(formula, ELEMENTS)
         pred = float(self.formula_model.predict(pd.DataFrame([vec], columns=ELEMENTS))[0])
 
-        # Exact / near-exact match logic adapted from the original cosine-style matching idea.
         input_norm = normalize_vector(vec.to_numpy(dtype=float))
         db_matrix = self.unique_df[ELEMENTS].to_numpy(dtype=float)
         db_norm = np.linalg.norm(db_matrix, axis=1, keepdims=True)
