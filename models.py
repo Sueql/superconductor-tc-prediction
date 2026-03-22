@@ -30,6 +30,7 @@ from config import (
     TARGET_COLUMN,
 )
 from data_loader import get_feature_target, get_formula_target, sample_random_assignment
+from progress_utils import log, progress, stage_end, stage_start
 
 
 @dataclass
@@ -67,10 +68,14 @@ def make_ridge_pipeline(alpha: float = 1.0) -> Pipeline:
 
 def train_full_linear_models(train_df: pd.DataFrame, outdir: Path) -> Dict[str, EvalResult]:
     _ensure_dir(outdir)
+    _t = stage_start("Train full linear models")
     X, y = get_feature_target(train_df)
 
+    log(f"Linear/Ridge training data shape: X={X.shape}, y={y.shape}")
     linear = make_linear_pipeline().fit(X, y)
+    log("Linear regression fitted")
     ridge = make_ridge_pipeline(1.0).fit(X, y)
+    log("Ridge regression fitted")
 
     joblib.dump(linear, LINEAR_MODEL_PATH)
     joblib.dump(ridge, RIDGE_MODEL_PATH)
@@ -118,15 +123,18 @@ def train_full_linear_models(train_df: pd.DataFrame, outdir: Path) -> Dict[str, 
         plt.savefig(outdir / f'{name}_residual_diagnostics.png', dpi=220)
         plt.close(fig)
 
+    stage_end("Train full linear models", _t)
     return metrics
 
 
 def repeated_holdout_cv(train_df: pd.DataFrame, n_repeats: int = 25, seed: int = CV_RANDOM_STATE) -> pd.DataFrame:
+    _t = stage_start("Repeated holdout CV for linear models")
     X, y = get_feature_target(train_df)
     rng = np.random.default_rng(seed)
 
     rows = []
     for repeat in range(n_repeats):
+        progress(repeat + 1, n_repeats, "linear/ridge repeated holdout", every=max(1, n_repeats // 5))
         assign = sample_random_assignment(len(train_df), rng)
         test_mask = assign == 1
         X_train, X_test = X.loc[~test_mask], X.loc[test_mask]
@@ -144,11 +152,13 @@ def repeated_holdout_cv(train_df: pd.DataFrame, n_repeats: int = 25, seed: int =
                 'r2': result.r2,
                 'test_size': len(X_test),
             })
+    stage_end("Repeated holdout CV for linear models", _t)
     return pd.DataFrame(rows)
 
 
 def run_linear_baseline_cv(train_df: pd.DataFrame, outdir: Path) -> pd.DataFrame:
     _ensure_dir(outdir)
+    _t = stage_start("Run linear baseline CV")
     cv_df = repeated_holdout_cv(train_df)
     cv_df.to_csv(outdir / 'linear_ridge_cv_results.csv', index=False)
 
@@ -165,6 +175,7 @@ def run_linear_baseline_cv(train_df: pd.DataFrame, outdir: Path) -> pd.DataFrame
     plt.tight_layout()
     plt.savefig(outdir / 'linear_ridge_cv_sorted_metrics.png', dpi=220)
     plt.close()
+    stage_end("Run linear baseline CV", _t)
     return cv_df
 
 
@@ -178,7 +189,9 @@ def _fit_rf_oob(X: pd.DataFrame, y: pd.Series, *, max_features: int, n_estimator
         n_jobs=-1,
         random_state=random_state,
     )
+    log(f"RF tuning fit data shape: X={X.shape}, y={y.shape}")
     model.fit(X, y)
+    log("RF tuning model fitted")
     if not hasattr(model, 'oob_prediction_'):
         raise RuntimeError('OOB predictions are unavailable. Check bootstrap/oob settings.')
     score = rmse(y, model.oob_prediction_)
@@ -189,14 +202,21 @@ def tune_random_forest(train_df: pd.DataFrame, outdir: Path, max_features_grid: 
                        n_estimators_grid: Iterable[int] = (1000, 2500),
                        min_samples_leaf_grid: Iterable[int] = (1, 5, 25)) -> pd.DataFrame:
     _ensure_dir(outdir)
+    _t = stage_start("Tune random forest")
     X, y = get_feature_target(train_df)
     if max_features_grid is None:
         max_features_grid = range(1, min(40, X.shape[1]) + 1)
 
     rows = []
+    max_features_grid = list(max_features_grid)
+    total_grid = len(max_features_grid) * len(tuple(n_estimators_grid)) * len(tuple(min_samples_leaf_grid))
+    grid_counter = 0
+    log(f"RF tuning grid size: {total_grid}")
     for max_features in max_features_grid:
         for n_estimators in n_estimators_grid:
             for min_leaf in min_samples_leaf_grid:
+                grid_counter += 1
+                progress(grid_counter, total_grid, "rf tuning grid", every=max(1, total_grid // 20))
                 _, score = _fit_rf_oob(
                     X, y,
                     max_features=max_features,
@@ -221,11 +241,15 @@ def tune_random_forest(train_df: pd.DataFrame, outdir: Path, max_features_grid: 
     plt.tight_layout()
     plt.savefig(outdir / 'rf_tuning_sorted_rmse.png', dpi=220)
     plt.close()
+    if not results.empty:
+        log(f"Best RF tuning row: {results.iloc[0].to_dict()}")
+    stage_end("Tune random forest", _t)
     return results
 
 
 def repeated_holdout_rf(train_df: pd.DataFrame, params: Dict[str, int], n_repeats: int = 25, seed: int = CV_RANDOM_STATE,
                         selected_features: List[str] | None = None) -> pd.DataFrame:
+    _t = stage_start("Repeated holdout CV for random forest")
     X, y = get_feature_target(train_df)
     if selected_features is None:
         selected_features = list(X.columns)
@@ -233,6 +257,7 @@ def repeated_holdout_rf(train_df: pd.DataFrame, params: Dict[str, int], n_repeat
     rng = np.random.default_rng(seed)
     rows = []
     for repeat in range(n_repeats):
+        progress(repeat + 1, n_repeats, "rf repeated holdout", every=max(1, n_repeats // 5))
         assign = sample_random_assignment(len(train_df), rng)
         test_mask = assign == 1
         X_train, X_test = X.loc[~test_mask], X.loc[test_mask]
@@ -256,6 +281,7 @@ def repeated_holdout_rf(train_df: pd.DataFrame, params: Dict[str, int], n_repeat
             'test_size': len(X_test),
             'n_features': len(selected_features),
         })
+    stage_end("Repeated holdout CV for random forest", _t)
     return pd.DataFrame(rows)
 
 
@@ -279,13 +305,18 @@ def rf_rfe_ranking_from_xy(
     permutation_repeats: int = 3,
     ranking_n_estimators: int | None = None,
     random_state: int = RANDOM_STATE,
+    stop_at_n: int = 1,
 ) -> tuple[pd.DataFrame, list[str]]:
+    _t = stage_start("RF-RFE ranking from feature matrix")
     current_features = list(X.columns)
     removed_rows: list[dict] = []
     step = 0
 
-    while len(current_features) > 1:
+    stop_at_n = max(1, min(int(stop_at_n), len(current_features)))
+    total_steps = len(current_features) - stop_at_n
+    while len(current_features) > stop_at_n:
         step += 1
+        progress(step, total_steps, "rf-rfe ranking", every=max(1, total_steps // 20))
         model = _rf_for_selection(params, len(current_features), random_state + step, ranking_n_estimators)
         model.fit(X[current_features], y)
         perm = permutation_importance(
@@ -295,7 +326,7 @@ def rf_rfe_ranking_from_xy(
             scoring='neg_root_mean_squared_error',
             n_repeats=permutation_repeats,
             random_state=random_state + step,
-            n_jobs=-1,
+            n_jobs=1,
         )
         imp = pd.Series(perm.importances_mean, index=current_features)
         least = imp.idxmin()
@@ -307,12 +338,24 @@ def rf_rfe_ranking_from_xy(
         })
         current_features.remove(least)
 
-    most_important = current_features[0]
-    ranking_desc = [most_important] + [row['removed_feature'] for row in reversed(removed_rows)]
+    final_model = _rf_for_selection(params, len(current_features), random_state + 10_000, ranking_n_estimators)
+    final_model.fit(X[current_features], y)
+    final_perm = permutation_importance(
+        final_model,
+        X[current_features],
+        y,
+        scoring='neg_root_mean_squared_error',
+        n_repeats=permutation_repeats,
+        random_state=random_state + 10_000,
+        n_jobs=1,
+    )
+    remaining_order = pd.Series(final_perm.importances_mean, index=current_features).sort_values(ascending=False).index.tolist()
+    ranking_desc = remaining_order + [row['removed_feature'] for row in reversed(removed_rows)]
     ranking_df = pd.DataFrame(removed_rows)
     ranking_df['rank_from_most_important'] = ranking_df['removed_feature'].map(
         {feat: idx + 1 for idx, feat in enumerate(ranking_desc)}
     )
+    stage_end("RF-RFE ranking from feature matrix", _t)
     return ranking_df, ranking_desc
 
 
@@ -322,8 +365,10 @@ def recursive_feature_elimination_rf(
     params: Dict[str, int] | None = None,
     permutation_repeats: int = 3,
     ranking_n_estimators: int | None = None,
+    stop_at_n: int = 1,
 ) -> tuple[pd.DataFrame, list[str]]:
     _ensure_dir(outdir)
+    _t = stage_start("Recursive feature elimination wrapper")
     if params is None:
         params = {'max_features': 10, 'n_estimators': 500, 'min_samples_leaf': 1}
 
@@ -335,6 +380,7 @@ def recursive_feature_elimination_rf(
         permutation_repeats=permutation_repeats,
         ranking_n_estimators=ranking_n_estimators,
         random_state=RANDOM_STATE,
+        stop_at_n=stop_at_n,
     )
     ranking_df.to_csv(outdir / 'rfe_variable_importance.csv', index=False)
     pd.DataFrame({'feature': ranking_desc, 'rank': np.arange(1, len(ranking_desc) + 1)}).to_csv(
@@ -350,6 +396,7 @@ def recursive_feature_elimination_rf(
     plt.tight_layout()
     plt.savefig(outdir / 'rfe_variable_importance_top_20.png', dpi=220)
     plt.close()
+    stage_end("Recursive feature elimination wrapper", _t)
     return ranking_df, ranking_desc
 
 
@@ -369,6 +416,7 @@ def select_top_n_via_rfe_cv(
     seed: int = CV_RANDOM_STATE,
 ) -> tuple[pd.DataFrame, pd.DataFrame, int]:
     _ensure_dir(outdir)
+    _t = stage_start("Select top-n via RF-RFE CV")
     X, y = get_feature_target(train_df)
     rng = np.random.default_rng(seed)
     if candidate_ns is None:
@@ -377,6 +425,8 @@ def select_top_n_via_rfe_cv(
 
     rows: list[dict] = []
     for repeat in range(n_repeats):
+        progress(repeat + 1, n_repeats, "top-n selection outer repeats", every=max(1, n_repeats // 5))
+        log(f"Computing RF-RFE ranking for outer repeat {repeat + 1}/{n_repeats}")
         assign = sample_random_assignment(len(train_df), rng)
         test_mask = assign == 1
         X_train, X_test = X.loc[~test_mask], X.loc[test_mask]
@@ -389,9 +439,11 @@ def select_top_n_via_rfe_cv(
             permutation_repeats=permutation_repeats,
             ranking_n_estimators=ranking_n_estimators,
             random_state=seed + repeat * 1000,
+            stop_at_n=max(candidate_ns),
         )
 
-        for n in candidate_ns:
+        for idx_n, n in enumerate(candidate_ns, start=1):
+            progress(idx_n, len(candidate_ns), f"top-n candidates for repeat {repeat + 1}", every=max(1, len(candidate_ns) // 5))
             selected = ranking_desc[:n]
             model = RandomForestRegressor(
                 n_estimators=params['n_estimators'],
@@ -431,6 +483,8 @@ def select_top_n_via_rfe_cv(
     plt.tight_layout()
     plt.savefig(outdir / 'rfe_topn_selection_curve.png', dpi=220)
     plt.close()
+    log(f"Best top-n selected from RF-RFE CV: {best_n}")
+    stage_end("Select top-n via RF-RFE CV", _t)
     return detail_df, summary_df, best_n
 
 
@@ -441,6 +495,7 @@ def fit_final_random_forest(
     selected_features: List[str] | None = None,
 ) -> Tuple[RandomForestRegressor, pd.DataFrame]:
     _ensure_dir(outdir)
+    _t = stage_start("Fit final random forest")
     X, y = get_feature_target(train_df)
     if params is None:
         params = {'max_features': 10, 'n_estimators': 1000, 'min_samples_leaf': 1}
@@ -448,6 +503,7 @@ def fit_final_random_forest(
         selected_features = list(X.columns)
 
     X_sel = X[selected_features]
+    log(f"Final RF feature count: {len(selected_features)}")
     model = RandomForestRegressor(
         n_estimators=params['n_estimators'],
         max_features=min(params['max_features'], len(selected_features)),
@@ -458,6 +514,7 @@ def fit_final_random_forest(
         random_state=RANDOM_STATE,
     )
     model.fit(X_sel, y)
+    log("Final RF model fitted")
     joblib.dump(model, RF_FEATURE_MODEL_PATH)
 
     metadata = {
@@ -520,6 +577,7 @@ def fit_final_random_forest(
     pd.DataFrame([{'residual_sd': float(sd_limit), 'within_1sd_fraction': coverage}]).to_csv(
         outdir / 'random_forest_residual_summary.csv', index=False
     )
+    stage_end("Fit final random forest", _t)
     return model, train_metrics
 
 
@@ -528,14 +586,21 @@ def run_optional_gbm_grid(train_df: pd.DataFrame, outdir: Path,
                           learning_rates: Iterable[float] = (0.05, 0.10),
                           n_estimators_map: Dict[float, int] | None = None) -> pd.DataFrame:
     _ensure_dir(outdir)
+    _t = stage_start("Optional GBM grid")
     X, y = get_feature_target(train_df)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=1.0/3.0, random_state=10_000)
     if n_estimators_map is None:
         n_estimators_map = {0.05: 2000, 0.10: 1000}
 
     rows = []
+    learning_rates = list(learning_rates)
+    depths = list(depths)
+    total_grid = len(learning_rates) * len(depths)
+    grid_counter = 0
     for lr in learning_rates:
         for depth in depths:
+            grid_counter += 1
+            progress(grid_counter, total_grid, "gbm grid", every=max(1, total_grid // 10))
             model = GradientBoostingRegressor(
                 random_state=RANDOM_STATE,
                 learning_rate=lr,
@@ -553,15 +618,18 @@ def run_optional_gbm_grid(train_df: pd.DataFrame, outdir: Path,
             })
     results = pd.DataFrame(rows).sort_values('rmse_test')
     results.to_csv(outdir / 'gbm_grid_results.csv', index=False)
+    stage_end("Optional GBM grid", _t)
     return results
 
 
 def train_formula_random_forest(unique_df: pd.DataFrame, outdir: Path,
                                 params: Dict[str, int] | None = None) -> RandomForestRegressor:
     _ensure_dir(outdir)
+    _t = stage_start("Train formula random forest")
     X, y = get_formula_target(unique_df)
     if params is None:
         params = {'max_features': 10, 'n_estimators': 1000, 'min_samples_leaf': 1}
+    log(f"Formula-model training data shape: X={X.shape}, y={y.shape}")
     model = RandomForestRegressor(
         n_estimators=params['n_estimators'],
         max_features=min(params['max_features'], X.shape[1]),
@@ -572,9 +640,11 @@ def train_formula_random_forest(unique_df: pd.DataFrame, outdir: Path,
         random_state=RANDOM_STATE,
     )
     model.fit(X, y)
+    log("Formula RF model fitted")
     joblib.dump(model, RF_FORMULA_MODEL_PATH)
     pd.DataFrame([{
         'rmse_oob': rmse(y, model.oob_prediction_),
         'r2_oob': float(r2_score(y, model.oob_prediction_)),
     }]).to_csv(outdir / 'rf_formula_metrics.csv', index=False)
+    stage_end("Train formula random forest", _t)
     return model

@@ -21,6 +21,7 @@ from models import (
 )
 from predictor import SuperconductorPredictor
 from training import run_full_pipeline
+from progress_utils import log
 
 
 def _load_best_params() -> dict:
@@ -37,6 +38,7 @@ def _load_best_params() -> dict:
 
 
 def cmd_check_data() -> None:
+    log("Command check-data started")
     train_df, unique_df, train_with_indicators = load_aligned_datasets()
     print('train.csv:', train_df.shape)
     print('unique_m.csv:', unique_df.shape)
@@ -44,12 +46,14 @@ def cmd_check_data() -> None:
 
 
 def cmd_analyze() -> None:
+    log("Command analyze started")
     train_df, unique_df, train_with_indicators = load_aligned_datasets()
     run_all_analyses(train_df, unique_df, train_with_indicators, OUTPUT_DIR / 'analysis')
     print('Analysis completed. Files saved to outputs/analysis/')
 
 
 def cmd_train_baselines() -> None:
+    log("Command train-baselines started")
     train_df, _, _ = load_aligned_datasets()
     train_full_linear_models(train_df, OUTPUT_DIR / 'linear_full_fit')
     cv_df = run_linear_baseline_cv(train_df, OUTPUT_DIR / 'linear_cv')
@@ -57,12 +61,14 @@ def cmd_train_baselines() -> None:
 
 
 def cmd_tune_rf() -> None:
+    log("Command tune-rf started")
     train_df, _, _ = load_aligned_datasets()
     results = tune_random_forest(train_df, OUTPUT_DIR / 'rf_tuning')
     print(results.head())
 
 
 def cmd_train_rf() -> None:
+    log("Command train-rf started")
     train_df, unique_df, _ = load_aligned_datasets()
     params = _load_best_params()
 
@@ -72,6 +78,7 @@ def cmd_train_rf() -> None:
         params,
         permutation_repeats=3,
         ranking_n_estimators=min(300, params['n_estimators']),
+        stop_at_n=25,
     )
     _, summary_df, best_n = select_top_n_via_rfe_cv(
         train_df,
@@ -95,6 +102,7 @@ def cmd_train_rf() -> None:
 
 
 def cmd_rfe() -> None:
+    log("Command rfe started")
     train_df, _, _ = load_aligned_datasets()
     params = _load_best_params()
     ranking_df, ranking_desc = recursive_feature_elimination_rf(
@@ -103,6 +111,7 @@ def cmd_rfe() -> None:
         params,
         permutation_repeats=3,
         ranking_n_estimators=min(300, params['n_estimators']),
+        stop_at_n=25,
     )
     _, summary_df, best_n = select_top_n_via_rfe_cv(
         train_df,
@@ -118,17 +127,20 @@ def cmd_rfe() -> None:
 
 
 def cmd_gbm() -> None:
+    log("Command gbm started")
     train_df, _, _ = load_aligned_datasets()
     results = run_optional_gbm_grid(train_df, OUTPUT_DIR / 'gbm_optional')
     print(results.head())
 
 
 def cmd_train_all(with_gbm: bool) -> None:
+    log("Command train-all started")
     summary = run_full_pipeline(run_optional_gbm=with_gbm, run_rfe=True, rfe_max_steps=25)
     print(json.dumps(summary, indent=2))
 
 
 def cmd_predict_formula(formula: str, match_level: float) -> None:
+    log("Command predict-formula started")
     predictor = SuperconductorPredictor()
     res = predictor.predict_from_formula(formula, match_level=match_level)
     print(f'Formula: {res.formula}')
@@ -140,6 +152,7 @@ def cmd_predict_formula(formula: str, match_level: float) -> None:
 
 
 def cmd_predict_feature_row(csv_path: str) -> None:
+    log("Command predict-feature-row started")
     df = pd.read_csv(csv_path)
     if len(df) != 1:
         raise ValueError('Input CSV must contain exactly one row.')

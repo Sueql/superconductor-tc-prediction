@@ -11,6 +11,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
 from config import ELEMENTS, FEATURE_COLUMNS, TARGET_COLUMN
+from progress_utils import log, progress, stage_end, stage_start
 
 
 def _ensure_dir(path: Path) -> None:
@@ -19,6 +20,7 @@ def _ensure_dir(path: Path) -> None:
 
 def run_element_proportion_analysis(unique_df: pd.DataFrame, outdir: Path) -> pd.Series:
     _ensure_dir(outdir)
+    _t = stage_start("Element proportion analysis")
     proportions = (unique_df[ELEMENTS] > 0).sum(axis=0) / len(unique_df)
     proportions = proportions[proportions > 0].sort_values(ascending=False)
     proportions.to_csv(outdir / 'element_proportions.csv', header=['proportion'])
@@ -38,13 +40,17 @@ def run_element_proportion_analysis(unique_df: pd.DataFrame, outdir: Path) -> pd
 
     _plot(proportions, 'element_proportions.png', 'Element proportions in unique superconductors')
     _plot(proportions.head(20), 'element_proportions_top_20.png', 'Top 20 element proportions')
+    stage_end("Element proportion analysis", _t)
     return proportions
 
 
 def run_element_temperature_summary(unique_df: pd.DataFrame, outdir: Path) -> pd.DataFrame:
     _ensure_dir(outdir)
+    _t = stage_start("Element temperature summary")
     rows = []
-    for el in ELEMENTS:
+    total_elements = len(ELEMENTS)
+    for idx, el in enumerate(ELEMENTS, start=1):
+        progress(idx, total_elements, "element temperature summary", every=10)
         temps = unique_df.loc[unique_df[el] > 0, TARGET_COLUMN].astype(float)
         if len(temps) == 0:
             continue
@@ -101,11 +107,13 @@ def run_element_temperature_summary(unique_df: pd.DataFrame, outdir: Path) -> pd
     plt.tight_layout()
     plt.savefig(outdir / 'sd_vs_mean_crit_temp.png', dpi=220)
     plt.close()
+    stage_end("Element temperature summary", _t)
     return summary
 
 
 def run_temperature_distribution_analysis(unique_df: pd.DataFrame, outdir: Path) -> Dict[str, float]:
     _ensure_dir(outdir)
+    _t = stage_start("Critical temperature distribution analysis")
     temps = unique_df[TARGET_COLUMN].astype(float)
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
@@ -126,12 +134,15 @@ def run_temperature_distribution_analysis(unique_df: pd.DataFrame, outdir: Path)
 
     summary = temps.describe().to_dict()
     pd.Series(summary).to_csv(outdir / 'critical_temp_summary.csv', header=['value'])
+    stage_end("Critical temperature distribution analysis", _t)
     return summary
 
 
 def run_indicator_analysis(train_with_indicators: pd.DataFrame, outdir: Path) -> None:
     _ensure_dir(outdir)
+    _t = stage_start("Indicator analysis (iron/cuprate)")
     for indicator in ['iron', 'cuprate']:
+        log(f"Preparing indicator plot and stats for {indicator}")
         groups = [
             train_with_indicators.loc[train_with_indicators[indicator] == 0, TARGET_COLUMN].astype(float),
             train_with_indicators.loc[train_with_indicators[indicator] == 1, TARGET_COLUMN].astype(float),
@@ -155,13 +166,17 @@ def run_indicator_analysis(train_with_indicators: pd.DataFrame, outdir: Path) ->
             'max': [groups[0].max(), groups[1].max()],
         })
         stats.to_csv(outdir / f'{indicator}_group_stats.csv', index=False)
+    stage_end("Indicator analysis (iron/cuprate)", _t)
 
 
 def run_feature_plots(train_with_indicators: pd.DataFrame, outdir: Path) -> None:
     _ensure_dir(outdir)
+    _t = stage_start("Univariate feature plots")
     cols = FEATURE_COLUMNS + ['iron', 'cuprate']
     with PdfPages(outdir / 'univariate_plots.pdf') as pdf:
-        for col in cols:
+        total_cols = len(cols)
+        for idx, col in enumerate(cols, start=1):
+            progress(idx, total_cols, "univariate plots", every=10)
             plt.figure(figsize=(6, 4))
             plt.scatter(train_with_indicators[col], train_with_indicators[TARGET_COLUMN], s=6, alpha=0.45)
             plt.xlabel(col)
@@ -169,10 +184,12 @@ def run_feature_plots(train_with_indicators: pd.DataFrame, outdir: Path) -> None
             plt.tight_layout()
             pdf.savefig()
             plt.close()
+    stage_end("Univariate feature plots", _t)
 
 
 def run_correlation_and_pca(train_df: pd.DataFrame, outdir: Path) -> None:
     _ensure_dir(outdir)
+    _t = stage_start("Correlation and PCA analysis")
     X = train_df[FEATURE_COLUMNS].astype(float)
     corr = X.corr()
     corr.to_csv(outdir / 'feature_correlation_matrix.csv')
@@ -209,13 +226,16 @@ def run_correlation_and_pca(train_df: pd.DataFrame, outdir: Path) -> None:
     plt.tight_layout()
     plt.savefig(outdir / 'pca_cumulative_variance.png', dpi=220)
     plt.close()
+    stage_end("Correlation and PCA analysis", _t)
 
 
 def run_all_analyses(train_df: pd.DataFrame, unique_df: pd.DataFrame, train_with_indicators: pd.DataFrame, outdir: Path) -> None:
     _ensure_dir(outdir)
+    _t = stage_start("All analyses")
     run_element_proportion_analysis(unique_df, outdir / 'element_proportions')
     run_element_temperature_summary(unique_df, outdir / 'element_temperature_summary')
     run_temperature_distribution_analysis(unique_df, outdir / 'critical_temp_distribution')
     run_indicator_analysis(train_with_indicators, outdir / 'indicator_analysis')
     run_feature_plots(train_with_indicators, outdir / 'feature_plots')
     run_correlation_and_pca(train_df, outdir / 'correlation_and_pca')
+    stage_end("All analyses", _t)

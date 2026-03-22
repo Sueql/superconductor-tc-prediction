@@ -17,19 +17,26 @@ from models import (
     run_optional_gbm_grid,
     select_top_n_via_rfe_cv,
 )
+from progress_utils import log, stage_end, stage_start
 
 
 def run_full_pipeline(run_optional_gbm: bool = False, run_rfe: bool = False, rfe_max_steps: int | None = 25) -> dict:
+    _t = stage_start("Full training pipeline")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
     train_df, unique_df, train_with_indicators = load_aligned_datasets()
+    log(f"Loaded datasets: train={train_df.shape}, unique={unique_df.shape}, with_indicators={train_with_indicators.shape}")
 
+    log("Launching analysis stage")
     run_all_analyses(train_df, unique_df, train_with_indicators, OUTPUT_DIR / 'analysis')
 
+    log("Launching full linear model fit")
     linear_full = train_full_linear_models(train_df, OUTPUT_DIR / 'linear_full_fit')
+    log("Launching linear baseline repeated holdout CV")
     linear_cv = run_linear_baseline_cv(train_df, OUTPUT_DIR / 'linear_cv')
 
+    log("Launching random forest tuning")
     rf_tuning = tune_random_forest(train_df, OUTPUT_DIR / 'rf_tuning')
     best = rf_tuning.iloc[0].to_dict()
     best_params = {
@@ -38,18 +45,27 @@ def run_full_pipeline(run_optional_gbm: bool = False, run_rfe: bool = False, rfe
         'min_samples_leaf': int(best['min_samples_leaf']),
     }
 
+    log("Launching RF-RFE ranking")
     ranking_df, ranking_desc = recursive_feature_elimination_rf(
         train_df,
         OUTPUT_DIR / 'rfe',
         best_params,
         permutation_repeats=3,
         ranking_n_estimators=min(300, best_params['n_estimators']),
+        stop_at_n=(rfe_max_steps if rfe_max_steps is not None else 1),
     )
+
+    log("Launching top-n selection based on RF-RFE ranking")
+    candidate_ns = None
+    if rfe_max_steps is not None:
+        max_n = min(len(ranking_desc), int(rfe_max_steps))
+        candidate_ns = list(range(1, max_n + 1))
 
     topn_detail, topn_summary, best_n = select_top_n_via_rfe_cv(
         train_df,
         OUTPUT_DIR / 'rfe_topn_selection',
         best_params,
+        candidate_ns=candidate_ns,
         n_repeats=5,
         permutation_repeats=2,
         ranking_n_estimators=min(200, best_params['n_estimators']),
@@ -57,15 +73,19 @@ def run_full_pipeline(run_optional_gbm: bool = False, run_rfe: bool = False, rfe
 
     selected_features = ranking_desc[:best_n]
 
+    log(f"Launching repeated holdout RF using selected top-{best_n} features")
     rf_cv = repeated_holdout_rf(train_df, best_params, selected_features=selected_features)
     rf_cv.to_csv(OUTPUT_DIR / 'rf_cv_results.csv', index=False)
     rf_cv[['rmse', 'r2']].describe().to_csv(OUTPUT_DIR / 'rf_cv_summary.csv')
 
+    log("Launching final RF fit")
     _, rf_final_metrics = fit_final_random_forest(train_df, OUTPUT_DIR / 'rf_final', best_params, selected_features)
+    log("Launching formula-based RF fit")
     train_formula_random_forest(unique_df, OUTPUT_DIR / 'formula_model', best_params)
 
     gbm_results_path = None
     if run_optional_gbm:
+        log("Launching optional GBM grid")
         gbm_results = run_optional_gbm_grid(train_df, OUTPUT_DIR / 'gbm_optional')
         gbm_results_path = str((OUTPUT_DIR / 'gbm_optional' / 'gbm_grid_results.csv').resolve())
 
@@ -84,6 +104,7 @@ def run_full_pipeline(run_optional_gbm: bool = False, run_rfe: bool = False, rfe
         'gbm_results_csv': gbm_results_path,
     }
     METRICS_JSON.write_text(json.dumps(summary, indent=2), encoding='utf-8')
+    stage_end("Full training pipeline", _t)
     return summary
 
 

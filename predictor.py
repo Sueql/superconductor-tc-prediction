@@ -20,6 +20,7 @@ from config import (
 )
 from data_loader import load_aligned_datasets
 from formula_parser import formula_to_vector, normalize_vector
+from progress_utils import log
 
 
 @dataclass
@@ -32,6 +33,7 @@ class FormulaPredictionResult:
 
 class SuperconductorPredictor:
     def __init__(self, feature_model_path: Path = RF_FEATURE_MODEL_PATH, formula_model_path: Path = RF_FORMULA_MODEL_PATH):
+        log("Initializing SuperconductorPredictor")
         self.feature_model = joblib.load(feature_model_path) if Path(feature_model_path).exists() else None
         self.formula_model = joblib.load(formula_model_path) if Path(formula_model_path).exists() else None
         self.train_df, self.unique_df, self.train_with_indicators = load_aligned_datasets()
@@ -41,6 +43,7 @@ class SuperconductorPredictor:
             self.selected_features = metadata.get('selected_features', list(FEATURE_COLUMNS))
 
     def predict_from_feature_row(self, feature_row: Dict[str, float]) -> float:
+        log("Predicting from one feature row")
         if self.feature_model is None:
             raise FileNotFoundError('Feature random forest model is not trained yet.')
         missing = [k for k in FEATURE_COLUMNS if k not in feature_row]
@@ -51,6 +54,7 @@ class SuperconductorPredictor:
         return float(pred)
 
     def predict_from_formula(self, formula: str, match_level: float = 0.999999, top_k: int = 5) -> FormulaPredictionResult:
+        log(f"Predicting from formula: {formula}")
         if self.formula_model is None:
             raise FileNotFoundError('Formula random forest model is not trained yet.')
 
