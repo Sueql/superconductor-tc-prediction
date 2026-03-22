@@ -1,0 +1,62 @@
+{
+  "linear_full_fit": {
+    "LinearRegression_train": {
+      "rmse": 17.55750402094344,
+      "r2": 0.7372672563830796
+    },
+    "Ridge_train": {
+      "rmse": 17.565977167959655,
+      "r2": 0.7370136086745047
+    }
+  },
+  "linear_cv_mean": {
+    "rmse": {
+      "LinearRegression": 17.644496357304163,
+      "Ridge": 17.655994238487263
+    },
+    "r2": {
+      "LinearRegression": 0.7342892668790337,
+      "Ridge": 0.7339440872298485
+    }
+  },
+  "rf_best_params": {
+    "max_features": 21,
+    "n_estimators": 2500,
+    "min_samples_leaf": 1
+  },
+  "rf_selected_feature_count": 24,
+  "rf_selected_features": [
+    "range_ThermalConductivity",
+    "wtd_gmean_Valence",
+    "wtd_gmean_ThermalConductivity",
+    "std_atomic_mass",
+    "wtd_entropy_ThermalConductivity",
+    "wtd_mean_Valence",
+    "wtd_std_ElectronAffinity",
+    "range_atomic_radius",
+    "wtd_std_ThermalConductivity",
+    "wtd_entropy_FusionHeat",
+    "wtd_range_atomic_mass",
+    "std_Density",
+    "mean_Density",
+    "gmean_ElectronAffinity",
+    "entropy_Density",
+    "wtd_std_Valence",
+    "wtd_mean_ThermalConductivity",
+    "gmean_Density",
+    "wtd_mean_atomic_mass",
+    "wtd_entropy_atomic_mass",
+    "wtd_range_fie",
+    "wtd_gmean_ElectronAffinity",
+    "wtd_std_atomic_radius",
+    "std_atomic_radius"
+  ],
+  "rf_cv_mean": {
+    "rmse": 9.680523621438635,
+    "r2": 0.9199967220328389
+  },
+  "rf_final_metrics_csv": "D:\\HKUST\\Spring Term\\MSPY5250 \u4eba\u5de5\u667a\u80fd\u5728\u79d1\u5b66\u4e2d\u7684\u5e94\u7528\\Assignments\\midterm\\superconductor_tc_prediction_v4\\outputs\\rf_final\\rf_final_metrics.csv",
+  "rfe_results_csv": "D:\\HKUST\\Spring Term\\MSPY5250 \u4eba\u5de5\u667a\u80fd\u5728\u79d1\u5b66\u4e2d\u7684\u5e94\u7528\\Assignments\\midterm\\superconductor_tc_prediction_v4\\outputs\\rfe\\rfe_variable_importance.csv",
+  "rfe_topn_summary_csv": "D:\\HKUST\\Spring Term\\MSPY5250 \u4eba\u5de5\u667a\u80fd\u5728\u79d1\u5b66\u4e2d\u7684\u5e94\u7528\\Assignments\\midterm\\superconductor_tc_prediction_v4\\outputs\\rfe_topn_selection\\rfe_topn_cv_summary.csv",
+  "gbm_results_csv": null
+}
