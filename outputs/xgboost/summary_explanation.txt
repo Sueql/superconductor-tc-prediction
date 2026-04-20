@@ -1,0 +1,16 @@
+How the metrics were improved:
+1) Use only the previously selected top24 features to reduce noise and redundant information.
+2) Keep a clean 80/20 hold-out split so evaluation is stricter and more interpretable.
+3) Compare a baseline RF against tuned RF and tuned XGBoost on the same validation split.
+4) Select the best model by validation RMSE, then retrain all three models on the full training split for explicit test-set comparison.
+5) Report MAE / RMSE / R2 together with accuracy under multiple tolerances (±1K, ±5K, ±10K).
+6) Export extra report/defense figures: full metric bars, predicted-vs-true panels, residual histograms, and absolute-error boxplots.
+
+Best model selected: Tuned_XGB
+MAE: 5.153062
+RMSE: 8.882586
+R2: 0.931455
+ACC@±1K: 0.268046
+ACC@±5K: 0.697390
+ACC@±10K: 0.846696
+Final accuracy criterion written in predictions CSV: ±10.00K

@@ -1,0 +1,31 @@
+{
+  "best_model": "Tuned_XGB",
+  "params": {
+    "Baseline_RF": {
+      "n_estimators": 1000,
+      "max_features": 10,
+      "min_samples_leaf": 1
+    },
+    "Tuned_RF": {
+      "max_features": 10,
+      "min_samples_leaf": 1,
+      "n_estimators": 1200,
+      "val_RMSE": 10.105635429595832,
+      "val_MAE": 5.711549277897963,
+      "val_R2": 0.9147999002967094
+    },
+    "Tuned_XGB": {
+      "colsample_bytree": 0.8,
+      "learning_rate": 0.03,
+      "max_depth": 8,
+      "min_child_weight": 3,
+      "n_estimators": 800,
+      "reg_lambda": 1.0,
+      "subsample": 0.8,
+      "val_RMSE": 10.105531390804256,
+      "val_MAE": 5.6992306623365145,
+      "val_R2": 0.914801654579228
+    }
+  },
+  "test_size": 0.2
+}

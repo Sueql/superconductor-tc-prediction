@@ -1,0 +1,2 @@
+accuracy_within_tolerance,tolerance_K,mae,rmse,r2,train_size,test_size,n_features
+0.8384669644956502,10.0,5.449902397181512,9.018762984227289,0.9293376188536179,17010,4253,24
