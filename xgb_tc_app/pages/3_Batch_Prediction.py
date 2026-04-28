@@ -10,9 +10,19 @@ def make_preview_table(df: pd.DataFrame):
     preview.index = range(1, len(preview) + 1)
     preview.index.name = None
 
+    if 'predicted_Tc' in preview.columns:
+        ordered_columns = ['predicted_Tc'] + [col for col in preview.columns if col != 'predicted_Tc']
+        preview = preview[ordered_columns]
+
     left_aligned_columns = [col for col in ['importance', 'predicted_Tc'] if col in preview.columns]
     if not left_aligned_columns:
         return preview
+
+    for col in left_aligned_columns:
+        if pd.api.types.is_numeric_dtype(preview[col]):
+            preview[col] = preview[col].map(lambda value: '' if pd.isna(value) else f'{value:.6f}')
+        else:
+            preview[col] = preview[col].astype(str)
 
     column_styles = [
         {
