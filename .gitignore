@@ -1,1 +1,4 @@
 models/
+xgb_tc_app原生版/
+models/rf_feature_model.joblib/
+models/rf_formula_model.joblib

@@ -1,190 +1,373 @@
-# Superconductor Tc Prediction (Python adaptation)
+# Superconductor Critical Temperature Prediction
 
-This project is a Python adaptation of the original `main_script_production_9.R` workflow for superconducting critical temperature prediction.  
-It is designed around the two CSV files you already have:
+This project predicts superconducting critical temperature, `Tc`, from chemical composition and engineered material descriptors.
+It contains a complete modeling pipeline, saved analysis outputs,
+command-line prediction tools, and a Streamlit web app for interactive demonstration.
 
-- `dataset/train.csv`
-- `dataset/unique_m.csv`
+Live app: [https://superconductor-tc-prediction.streamlit.app](https://superconductor-tc-prediction.streamlit.app)
 
-## Important note
+## Highlights
 
-The original R script does **three** conceptually different things:
+- Uses 21,263 superconducting material records.
+- Supports prediction from chemical formulas and engineered feature rows.
+- Includes exploratory analysis, baseline models, random forest feature selection, and XGBoost evaluation.
+- Uses a selected top-24 feature set for the deployed XGBoost app.
+- Provides both local model inference and web-based Streamlit prediction.
 
-1. **Raw-data cleaning** from the original NIMS material database.
-2. **Feature engineering** from chemical formula using elemental properties.
-3. **Analysis, model training, tuning, and prediction**.
-
-Because this Python project starts from the two CSV files you already own (`train.csv` and `unique_m.csv`), the raw NIMS cleanup stage is **not rerun from scratch**.  
-Instead, this adaptation fully implements the downstream functionality on top of your prepared datasets:
-
-- EDA and summary analysis
-- univariate plots
-- correlation + PCA
-- linear baseline + repeated holdout CV
-- random forest tuning + repeated holdout CV
-- RF-RFE ranking based on permutation importance
-- repeated-holdout selection of the best top-n features
-- final random forest model trained on the selected top-n features
-- variable importance on the selected model
-- optional GBM-style exploration
-- final prediction interface
-
-## Project structure
+## Project Structure
 
 ```text
 superconductor_tc_prediction/
-├── dataset/
-│   ├── train.csv
-│   ├── unique_m.csv
-│   └── README.md
-├── config.py
-├── formula_parser.py
-├── data_loader.py
-├── analysis.py
-├── models.py
-├── training.py
-├── predictor.py
-├── ui_streamlit.py
-├── main.py
-├── requirements.txt
-├── models/
-└── outputs/
+|-- dataset/
+|   |-- train.csv
+|   `-- unique_m.csv
+|-- models/
+|   |-- linear_model.joblib
+|   |-- ridge_model.joblib
+|   |-- rf_feature_model.joblib
+|   |-- rf_feature_model_metadata.json
+|   `-- rf_formula_model.joblib
+|-- outputs/
+|   |-- analysis/
+|   |-- rf_final/
+|   |-- rfe/
+|   |-- rfe_topn_selection/
+|   |-- xgb_top24_holdout_test/
+|   `-- xgboost/
+|-- xgb_tc_app/
+|   |-- Home.py
+|   |-- model_utils.py
+|   |-- feature_config.py
+|   |-- formula_parser.py
+|   |-- dataset/
+|   |-- pages/
+|   `-- test/
+|-- analysis.py
+|-- config.py
+|-- data_loader.py
+|-- formula_parser.py
+|-- main.py
+|-- models.py
+|-- predictor.py
+|-- requirements.txt
+|-- training.py
+|-- ui_streamlit.py
+|-- xgboost.py
+|-- rf_top24_test_split.py
+`-- xgb_top24_test_split.py
 ```
 
-## What each file does
+Key files:
 
-- `config.py`: paths, constants, feature names, model paths
-- `formula_parser.py`: parse chemical formulas like `Ba0.2La1.8Cu1O4`
-- `data_loader.py`: load and validate `train.csv` / `unique_m.csv`, add iron/cuprate indicators
-- `analysis.py`: plots and statistical summaries corresponding to the EDA sections of the R script
-- `models.py`: linear/ridge baseline, random forest tuning, RF-RFE ranking, top-n feature selection, final RF model, optional GBM, formula-model training
-- `training.py`: end-to-end orchestration
-- `predictor.py`: inference utilities for formula and feature-row prediction
-- `ui_streamlit.py`: interactive interface
-- `main.py`: command-line entry point
+- `main.py`: command-line entry point for data checks, analysis, training, and prediction.
+- `training.py`: end-to-end training pipeline.
+- `models.py`: model training, tuning, evaluation, and feature selection.
+- `predictor.py`: local inference utilities.
+- `xgboost.py`: random forest and XGBoost comparison workflow.
+- `ui_streamlit.py`: local random forest Streamlit interface.
+- `xgb_tc_app/`: deployable XGBoost Streamlit app.
 
-## Expected dataset format
+## Data
 
-### 1) `dataset/train.csv`
-Must contain the 81 engineered features plus `critical_temp`.
+The project uses two aligned CSV datasets.
 
-### 2) `dataset/unique_m.csv`
-Must contain:
-- 86 elemental-count columns (`H` ... `Rn`)
-- `critical_temp`
-- `material`
+`dataset/train.csv`
 
-The project assumes the rows in `train.csv` and `unique_m.csv` are aligned row-by-row.
+- Shape: `21263 x 82`
+- Contains 81 engineered material descriptors.
+- Uses `critical_temp` as the regression target.
 
-## Environment setup
+`dataset/unique_m.csv`
+
+- Shape: `21263 x 88`
+- Contains element-count columns from `H` to `Rn`.
+- Also contains `critical_temp` and `material`.
+
+The row order of the two files is expected to match.
+During loading, `data_loader.py` adds `iron` and `cuprate` indicator columns for analysis.
+
+## Setup
 
 ```bash
 python -m venv .venv
-# Windows:
-# .venv\Scripts\activate
-# macOS/Linux:
-# source .venv/bin/activate
+```
 
+Activate the environment:
+
+```bash
+# Windows
+.venv\Scripts\activate
+
+# macOS/Linux
+source .venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
 pip install -r requirements.txt
 ```
 
-## Recommended run order
+The root `requirements.txt` covers the packages used across the project:
+`numpy`, `pandas`, `scikit-learn`, `matplotlib`, `joblib`, `streamlit`, and `xgboost`.
 
-### 1. Check the datasets
+## Main Workflow
+
+Run all commands from the repository root.
+
+Check dataset validity:
+
 ```bash
 python main.py check-data
 ```
 
-### 2. Run all EDA / analysis
+Expected output for the current files:
+
+```text
+train.csv: (21263, 82)
+unique_m.csv: (21263, 90)
+train_with_indicators: (21263, 85)
+```
+
+`unique_m.csv` appears as 90 columns after loading because two indicator columns are added in memory.
+
+Run exploratory analysis:
+
 ```bash
 python main.py analyze
 ```
 
-### 3. Train linear baselines
+Output directory: `outputs/analysis/`
+
+Train linear and ridge baselines:
+
 ```bash
 python main.py train-baselines
 ```
 
-### 4. Tune random forest
+Main outputs:
+
+- `outputs/linear_full_fit/`
+- `outputs/linear_cv/`
+- `models/linear_model.joblib`
+- `models/ridge_model.joblib`
+
+Tune random forest:
+
 ```bash
 python main.py tune-rf
 ```
 
-### 5. Train final RF models (feature model + formula model)
-This step now automatically does:
-1. RF-RFE ranking
-2. repeated-holdout search for the best top-n features
-3. final RF training on the selected top-n subset
+Output directory: `outputs/rf_tuning/`
+
+Train final random forest models:
+
 ```bash
 python main.py train-rf
 ```
 
-### 6. Inspect RF-RFE feature ranking and top-n selection separately
-```bash
-python main.py rfe
-```
+Main outputs:
 
-### 7. Optional: GBM exploratory run
-```bash
-python main.py gbm
-```
+- `outputs/rfe/`
+- `outputs/rfe_topn_selection/`
+- `outputs/rf_final/`
+- `outputs/formula_model/`
+- `models/rf_feature_model.joblib`
+- `models/rf_formula_model.joblib`
+- `models/rf_feature_model_metadata.json`
 
-### 8. One-shot full pipeline
+Run the complete pipeline:
+
 ```bash
 python main.py train-all
 ```
 
-## Prediction from command line
+Optional GBM experiments:
 
-### Predict from a formula
+```bash
+python main.py train-all --with-gbm
+```
+
+## Prediction
+
+Predict from a chemical formula:
+
 ```bash
 python main.py predict-formula --formula "Ba0.2La1.8Cu1O4"
 ```
 
-### Predict from one CSV row of 81 features
+Predict from one row of engineered descriptors:
+
 ```bash
 python main.py predict-feature-row --csv path/to/one_row.csv
 ```
 
-## Launch the interactive interface
+The feature-row CSV must contain exactly one row and the required engineered feature columns.
+The deployed random forest feature subset is read from `models/rf_feature_model_metadata.json`.
+
+## XGBoost Evaluation
+
+The XGBoost workflow uses the selected top-24 features and compares baseline random forest, tuned random forest, and tuned XGBoost models.
+
+Run the comparison workflow:
+
+```bash
+python xgboost.py
+```
+
+Main outputs:
+
+- `outputs/xgboost/validation_model_comparison.csv`
+- `outputs/xgboost/test_model_comparison.csv`
+- `outputs/xgboost/best_model_test_metrics.csv`
+- `outputs/xgboost/best_model_feature_importance.csv`
+- `outputs/xgboost/best_model_predicted_vs_true.png`
+- `outputs/xgboost/best_model_residuals.png`
+
+Run additional top-24 holdout evaluations:
+
+```bash
+python xgb_top24_test_split.py
+python rf_top24_test_split.py
+```
+
+## Current Model Results
+
+The selected model in `outputs/xgboost/best_model_selection.json` is `Tuned_XGB`.
+
+Baseline_RF:
+
+```text
+MAE = 5.1415
+RMSE = 9.0348
+R2 = 0.9291
+ACC within 1 K = 0.3224
+ACC within 5 K = 0.6929
+ACC within 10 K = 0.8439
+```
+
+Tuned_RF:
+
+```text
+MAE = 5.1417
+RMSE = 9.0370
+R2 = 0.9291
+ACC within 1 K = 0.3231
+ACC within 5 K = 0.6929
+ACC within 10 K = 0.8441
+```
+
+Tuned_XGB:
+
+```text
+MAE = 5.1531
+RMSE = 8.8826
+R2 = 0.9315
+ACC within 1 K = 0.2680
+ACC within 5 K = 0.6974
+ACC within 10 K = 0.8467
+```
+
+The Streamlit deployment reports the Tuned_XGB snapshot:
+
+- test MAE: `5.1531 K`
+- test RMSE: `8.8826 K`
+- test R2: `0.9315`
+- accuracy within 10 K: `0.8467`
+- selected feature count: `24`
+
+## Selected Top-24 Features
+
+```text
+range_ThermalConductivity
+wtd_gmean_Valence
+wtd_gmean_ThermalConductivity
+std_atomic_mass
+wtd_entropy_ThermalConductivity
+wtd_mean_Valence
+wtd_std_ElectronAffinity
+range_atomic_radius
+wtd_std_ThermalConductivity
+wtd_entropy_FusionHeat
+wtd_range_atomic_mass
+std_Density
+mean_Density
+gmean_ElectronAffinity
+entropy_Density
+wtd_std_Valence
+wtd_mean_ThermalConductivity
+gmean_Density
+wtd_mean_atomic_mass
+wtd_entropy_atomic_mass
+wtd_range_fie
+wtd_gmean_ElectronAffinity
+wtd_std_atomic_radius
+std_atomic_radius
+```
+
+## Streamlit Apps
+
+### XGBoost Web App
+
+This is the app intended for web deployment.
+
+Live app:
+
+[https://superconductor-tc-prediction.streamlit.app](https://superconductor-tc-prediction.streamlit.app)
+
+Run locally:
+
+```bash
+pip install -r requirements.txt
+cd xgb_tc_app
+streamlit run Home.py
+```
+
+Pages:
+
+- `Formula to Tc`: predicts `Tc` from a chemical formula and shows nearest known materials.
+- `Top24 Features to Tc`: predicts `Tc` from the selected 24 descriptors.
+- `Batch Prediction`: accepts formula CSV files or top-24 feature CSV files.
+- `Model Insights`: displays model metrics and feature importance.
+
+The app trains XGBoost models from the CSV files in `xgb_tc_app/dataset/`, then caches them with Streamlit.
+It does not require the large `.joblib` model files in the root `models/` directory.
+
+Sample upload files:
+
+- `xgb_tc_app/test/Formula.csv`
+- `xgb_tc_app/test/Top24 feature.csv`
+
+### Local Random Forest App
 
 ```bash
 streamlit run ui_streamlit.py
 ```
 
-The interface supports:
+This interface uses the saved random forest models in `models/` and supports:
 
-1. **Formula-based prediction**  
-   This uses a random forest trained on the `unique_m.csv` elemental-count representation.  
-   It also returns exact/near-exact matches and top similar materials.
+- formula-based prediction
+- one-row engineered-feature prediction
+- display of selected RF features and saved training metrics
 
-2. **81-feature-row prediction**  
-   This uses the final random forest trained on the RF-RFE selected top-n subset of `train.csv`. You can still upload all 81 features; the app automatically keeps only the selected subset internally.
+## Deployment
 
-## Outputs generated
+For Streamlit Community Cloud or similar platforms, deploy the repository root and set the entry point to:
 
-The project writes results to:
+```text
+xgb_tc_app/Home.py
+```
 
-- `outputs/analysis/`
-- `outputs/linear_full_fit/`
-- `outputs/linear_cv/`
-- `outputs/rf_tuning/`
-- `outputs/rf_final/`
-- `outputs/formula_model/`
-- `outputs/rfe/`
-- `outputs/rfe_topn_selection/`
-- `outputs/gbm_optional/` (optional)
+Required deployment files:
 
-and models to:
+- `requirements.txt`
+- `xgb_tc_app/Home.py`
+- `xgb_tc_app/pages/`
+- `xgb_tc_app/model_utils.py`
+- `xgb_tc_app/feature_config.py`
+- `xgb_tc_app/formula_parser.py`
+- `xgb_tc_app/dataset/train.csv`
+- `xgb_tc_app/dataset/unique_m.csv`
 
-- `models/linear_model.joblib`
-- `models/ridge_model.joblib`
-- `models/rf_feature_model.joblib`
-- `models/rf_feature_model_metadata.json`
-- `models/rf_formula_model.joblib`
-
-## Design choice for the UI
-
-The original R prediction function computes the 81 engineered features directly from the chemical formula via elemental property tables.
-Since this Python project is constrained to the two CSV files you already have, the formula-based UI uses `unique_m.csv` directly and trains a separate composition/count-vector random forest.
-This keeps the interface fully functional without requiring extra elemental-property data files.
+The first page load can take time because the XGBoost models are trained on startup.
+Later requests in the same app session use Streamlit caching.
